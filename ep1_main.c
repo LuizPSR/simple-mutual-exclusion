@@ -8,9 +8,11 @@
  ***********************************/
 
 #define RES_NUM 8
-signed long resource_owner[RES_NUM];
+unsigned long resource_owner[RES_NUM];
 pthread_mutex_t resource_mutex[RES_NUM];
 pthread_cond_t resource_cond[RES_NUM]; 
+
+pthread_mutex_t managing_res = PTHREAD_MUTEX_INITIALIZER;
 
 #define MAX_THREADS 1000
 pthread_t threads[MAX_THREAD];
@@ -35,11 +37,40 @@ void init_recursos() {
   }
 }
 
-void trava_recursos() {
-  
+void trava_recursos(int* res_v, int res_c) {
+  pthread_mutex_lock(&managing_res);
+
+  // acquire all resources
+  int acquired_all = 0;
+  while(!acquired_all) {
+    acquired_all = 1;
+
+    for (int i=0; i<res_c; i++) {
+      int result = pthread_mutex_trylock(&resource_mutex[res_v[i]]);
+      if (result != 0) {
+        // if a resource is occupied, release all taken and wait
+        for (int j=0; j<i; j++) {
+          pthread_mutex_unlock(&resource_mutex[res_v[j]]);
+        }
+        acquired_all = 0;
+        pthread_cond_wait(&resource_cond[i], &managing_res);
+      }
+    }
+  }
+
+  // mark ownership
+  unsigned long tid = pthread_self();
+  for (int i=0; i<res_c; i++) {
+    resource_owner[res_v[i]] = tid;
+  }
+
+  pthread_mutex_unlock(&managing_res);
 }
 
 void libera_recursos() {
+
+  pthread_mutex_lock(&managing_res);
+  
   unsigned long owner = pthread_self();
   // first unlocks all used mutexes
   for (int i=0; i<RES_NUM; i++) {
@@ -53,7 +84,8 @@ void libera_recursos() {
       pthread_signal(&resource_cond[i]);
     }
   }
-
+  // there is no need to erase the owner
+  pthread_mutex_unlock(&managing_res);
 }
 
 void thread_func(void* args) {
@@ -63,6 +95,8 @@ void thread_func(void* args) {
   trava_recursos();
   spend_time(data->tid, 'C', data->f_time);
   libera_recursos();
+
+  free(data);
 
   pthread_exit()
 }
