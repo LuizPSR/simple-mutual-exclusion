@@ -1,6 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <pthreads>
+#include <pthread.h>
 #include "spend_time.h"
 
 /***********************************
@@ -15,15 +15,16 @@ pthread_cond_t resource_cond[RES_NUM];
 pthread_mutex_t managing_res = PTHREAD_MUTEX_INITIALIZER;
 
 #define MAX_THREADS 1000
-pthread_t threads[MAX_THREAD];
+pthread_t threads[MAX_THREADS];
 
-typedef struct thread_data_t {
+typedef struct thread_data {
+  int tid;
   int f_time;
   int c_time;
 
   int res_v[RES_NUM];
   int res_c;
-}
+} thread_data_t ;
 
 /***********************************
  ************ Behaviors ************
@@ -32,8 +33,8 @@ typedef struct thread_data_t {
 void init_recursos() {
   for (int i=0; i<RES_NUM; i++) {
     resource_owner[i] = 0;
-    resource_mutex[i] = PTHREAD_MUTEX_INITIALIZE;
-    resource_cond[i]  = PTHREAD_COND_INITIALIZER;
+    pthread_mutex_init(&resource_mutex[i], NULL);
+    pthread_cond_init(&resource_cond[i], NULL);
   }
 }
 
@@ -81,24 +82,23 @@ void libera_recursos() {
   // then signal waiting threads to proceed
   for (int i=0; i<RES_NUM; i++) {
     if (resource_owner[i] == owner) {
-      pthread_signal(&resource_cond[i]);
+      pthread_cond_signal(&resource_cond[i]);
     }
   }
   // there is no need to erase the owner
   pthread_mutex_unlock(&managing_res);
 }
 
-void thread_func(void* args) {
+void* thread_func(void* args) {
   thread_data_t* data = (thread_data_t*) args;
 
   spend_time(data->tid, NULL, data->f_time);
-  trava_recursos();
-  spend_time(data->tid, 'C', data->f_time);
+  trava_recursos(data->res_v, data->res_c);
+  spend_time(data->tid, "C", data->f_time);
   libera_recursos();
 
   free(data);
-
-  pthread_exit()
+  return NULL;
 }
 
 int main() {
@@ -128,9 +128,10 @@ int main() {
 
     res_c = 0;
     while (res_c < RES_NUM) {
-      res_v[res_c] = strtol(p, &e, 10);
+      res_v[res_c] = strtol(curr_int, &next_int, 10);
       if (curr_int == next_int) {
-        thread_data_t* args = (thread_data_t) malloc(sizeof(thread_data_t));
+        thread_data_t* args = (thread_data_t*) malloc(sizeof(thread_data_t));
+        args->tid = tid;
         args->f_time = f_time;
         args->c_time = c_time;
         for (int i=0; i<res_c; i++) {
